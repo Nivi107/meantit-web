@@ -4,6 +4,7 @@ import { API_URL, getHealth } from "./api.js";
 const LABELS = {
   paypal_paymart: "PayPal (PayMart)",
   paypal_fund: "PayPal (Fund)",
+  paypal_webhooks: "PayPal webhooks",
   database: "Database",
   anthropic: "Claude API",
 };
