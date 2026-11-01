@@ -1,0 +1,19 @@
+# Render Blueprint for the MeantIt web app.
+# On Render: New → Blueprint → pick this repo. VITE_API_URL is asked for
+# during setup: the backend's host, e.g. meantit-api.onrender.com
+
+services:
+  - type: web
+    name: meantit-web
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_URL
+        sync: false
