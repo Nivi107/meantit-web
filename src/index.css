@@ -1,3 +1,25 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Product pages come from the backend as plain HTML. */
+.product-page h1 { @apply text-2xl font-semibold; }
+.product-page .seller { @apply text-sm text-slate-500; }
+.product-page .price { @apply mt-2 text-xl font-medium; }
+.product-page .description { @apply mt-3 text-slate-700; }
+.product-page .sizes { @apply mt-2 text-sm text-slate-500; }
+.product-page .reviews { @apply mt-6 space-y-3; }
+.product-page .reviews h2 { @apply text-lg font-semibold; }
+.product-page .review { @apply rounded-lg bg-slate-50 p-3 text-sm; }
+.product-page .review b { @apply mr-2; }
+.product-page .review p { @apply mt-1 text-slate-700; }
+
+/* "Show what the agent saw": reveal hidden parts and mark them. */
+.agent-view [style*="display:none"],
+.agent-view [style*="display: none"],
+.agent-view [hidden] {
+  display: block !important;
+  @apply bg-red-50 ring-2 ring-red-400;
+}
+.agent-view [style*="display:none"] p,
+.agent-view [style*="display:none"] b { @apply text-red-800; }

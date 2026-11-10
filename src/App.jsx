@@ -1,58 +1,46 @@
-import { useEffect, useState } from "react";
-import { API_URL, getHealth } from "./api.js";
+import { useRoute } from "./router.js";
+import { Card } from "./components/ui.jsx";
+import Home from "./pages/Home.jsx";
+import Shopper from "./pages/Shopper.jsx";
+import Status from "./pages/Status.jsx";
+import Store from "./pages/Store.jsx";
 
-const LABELS = {
-  paypal_paymart: "PayPal (PayMart)",
-  paypal_fund: "PayPal (Fund)",
-  paypal_webhooks: "PayPal webhooks",
-  database: "Database",
-  anthropic: "Claude API",
-};
+const NAV = [
+  ["shopper", "Shop with an agent"],
+  ["store", "PayMart"],
+  ["dashboard", "Dashboard"],
+  ["status", "Status"],
+];
 
 export default function App() {
-  const [health, setHealth] = useState(null);
-  const [error, setError] = useState(null);
+  const [page, arg] = useRoute();
 
-  useEffect(() => {
-    getHealth().then(setHealth).catch((err) => setError(err.message));
-  }, []);
+  let content;
+  if (page === "shopper") content = <Shopper />;
+  else if (page === "store") content = <Store productId={arg} />;
+  else if (page === "status") content = <Status />;
+  else if (page === "dashboard") content = <Card>The marketplace dashboard is coming next.</Card>;
+  else content = <Home />;
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md rounded-xl bg-white shadow p-6 space-y-4">
-        <div>
-          <h1 className="text-2xl font-semibold">MeantIt</h1>
-          <p className="text-slate-500">Checkout guard for AI agent orders</p>
-        </div>
-
-        {!health && !error && (
-          <p className="text-slate-500">
-            Connecting to the backend… (the free server can take up to a minute to wake up)
-          </p>
-        )}
-
-        {error && (
-          <p className="text-red-600">
-            Backend not reachable at {API_URL}: {error}
-          </p>
-        )}
-
-        {health && (
-          <>
-            <p className="text-green-700 font-medium">Backend OK</p>
-            <ul className="space-y-1">
-              {Object.entries(health.configured).map(([key, ok]) => (
-                <li key={key} className="flex justify-between">
-                  <span>{LABELS[key] ?? key}</span>
-                  <span className={ok ? "text-green-700" : "text-slate-400"}>
-                    {ok ? "configured" : "not set"}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
-      </div>
-    </main>
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="border-b border-slate-200 bg-white">
+        <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+          <a href="#/" className="text-lg font-bold text-indigo-700">
+            MeantIt
+          </a>
+          {NAV.map(([key, label]) => (
+            <a
+              key={key}
+              href={`#/${key}`}
+              className={`text-sm ${page === key ? "font-semibold text-slate-900" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              {label}
+            </a>
+          ))}
+        </nav>
+      </header>
+      <main className="mx-auto max-w-6xl px-4 py-8">{content}</main>
+    </div>
   );
 }
