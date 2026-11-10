@@ -12,13 +12,30 @@ const VERDICTS = {
 const SEVERITY = ["MANDATE_INVALID", "LIMIT_EXCEEDED", "AGENT_MANIPULATED", "INTENT_MISMATCH", "INJECTION_SUSPECTED"];
 const rank = (code) => (SEVERITY.includes(code) ? SEVERITY.indexOf(code) : SEVERITY.length);
 
-const SUMMARY = {
-  ALLOW: "MeantIt checked the order against what you asked for and found no problems, so PayPal charged you.",
-  HOLD: "Something doesn't look like what you meant. Your money is held but not charged until you decide.",
-  BLOCK: "MeantIt stopped this order. The hold on your money was released; you weren't charged.",
+// The same card serves the shopper and the marketplace; only the wording changes.
+const WORDS = {
+  shopper: {
+    ALLOW: "MeantIt checked the order against what you asked for and found no problems, so PayPal charged you.",
+    HOLD: "Something doesn't look like what you meant. Your money is held but not charged until you decide.",
+    BLOCK: "MeantIt stopped this order. The hold on your money was released; you weren't charged.",
+    asked: "You asked for",
+    fits: "Does it fit what you asked?",
+    APPROVED: "You approved it.",
+    REJECTED: "You cancelled it.",
+  },
+  marketplace: {
+    ALLOW: "MeantIt found no problems, so the payment was captured. This sale was protected at checkout.",
+    HOLD: "MeantIt wasn't sure the shopper meant this. The money is held on PayPal until the shopper answers.",
+    BLOCK: "MeantIt stopped this order and released the hold. No charge, so no refund or dispute later.",
+    asked: "The shopper asked for",
+    fits: "Does it fit what they asked?",
+    APPROVED: "The shopper approved it, so the payment was captured.",
+    REJECTED: "The shopper said no, so the hold was released.",
+  },
 };
 
-export default function OrderCard({ order, userId, onChange }) {
+export default function OrderCard({ order, userId, onChange, audience = "shopper", footer }) {
+  const words = WORDS[audience];
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
   const waiting = order.decision === "HOLD" && order.payment_status === "AUTHORIZED" && !order.resolution;
@@ -45,16 +62,16 @@ export default function OrderCard({ order, userId, onChange }) {
     <Card className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-3">
-          <DecisionBadge decision={order.decision} />
+          <DecisionBadge decision={order.decision} short={audience === "marketplace"} />
           <PaymentStatus status={order.payment_status} />
         </div>
         <span className="text-xs text-slate-400">{order.id}</span>
       </div>
 
-      <p className="text-slate-700">{SUMMARY[order.decision]}</p>
+      <p className="text-slate-700">{words[order.decision]}</p>
 
       <div className="rounded-lg bg-slate-50 p-3 text-sm">
-        <p className="text-slate-500">You asked for</p>
+        <p className="text-slate-500">{words.asked}</p>
         <p className="font-medium">“{order.intent}”</p>
         <p className="mt-3 text-slate-500">The agent's cart</p>
         {order.items.map((item) => (
@@ -80,7 +97,7 @@ export default function OrderCard({ order, userId, onChange }) {
 
       {order.meaning.length > 0 && (
         <div>
-          <h3 className="mb-2 font-semibold">Does it fit what you asked?</h3>
+          <h3 className="mb-2 font-semibold">{words.fits}</h3>
           <ul className="space-y-1 text-sm">
             {order.meaning.map((row, i) => (
               <li key={i} className="flex flex-wrap gap-x-2">
@@ -103,7 +120,13 @@ export default function OrderCard({ order, userId, onChange }) {
         </div>
       )}
 
-      {waiting && (
+      {waiting && audience === "marketplace" && (
+        <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
+          Waiting for the shopper. If they don't answer by {new Date(order.hold_expires_at).toLocaleString()}, the hold is
+          released automatically.
+        </p>
+      )}
+      {waiting && audience === "shopper" && (
         <div className="rounded-lg bg-amber-50 p-4 ring-1 ring-amber-200">
           <p className="font-medium text-amber-900">Did you mean this?</p>
           <p className="text-sm text-amber-800">
@@ -123,11 +146,11 @@ export default function OrderCard({ order, userId, onChange }) {
       )}
       {order.resolution && (
         <p className="text-sm text-slate-600">
-          {{ APPROVED: "You approved it.", REJECTED: "You cancelled it.", EXPIRED: "Nobody answered, so it expired." }[
-            order.resolution
-          ]}
+          {{ ...words, EXPIRED: "Nobody answered in 24 hours, so the hold was released." }[order.resolution]}
         </p>
       )}
+
+      {footer}
 
       <Collapsible title="Signed Check record and PayPal IDs">
         <p className="text-sm text-slate-600">

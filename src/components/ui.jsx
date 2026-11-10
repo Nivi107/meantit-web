@@ -26,9 +26,11 @@ const DECISIONS = {
   PENDING: { label: "Checking…", className: "bg-slate-100 text-slate-700 ring-slate-300" },
 };
 
-export function DecisionBadge({ decision }) {
+// short: the marketplace's wording ("Held"); the shopper sees "Held for you".
+export function DecisionBadge({ decision, short = false }) {
   const d = DECISIONS[decision] || DECISIONS.PENDING;
-  return <span className={`inline-block rounded-full px-3 py-1 text-sm font-semibold ring-1 ${d.className}`}>{d.label}</span>;
+  const label = short && decision === "HOLD" ? "Held" : d.label;
+  return <span className={`inline-block rounded-full px-3 py-1 text-sm font-semibold ring-1 ${d.className}`}>{label}</span>;
 }
 
 const PAYMENTS = {

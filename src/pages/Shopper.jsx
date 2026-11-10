@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.js";
 import AgentSteps from "../components/AgentSteps.jsx";
+import { ClaimBadge, ClaimBox } from "../components/Claim.jsx";
 import OrderCard from "../components/OrderCard.jsx";
 import { Button, Card, Collapsible, DecisionBadge, Json, money } from "../components/ui.jsx";
 import { createKey, loadKey, moneySlip, publicJwk, readJwt, shoppingSlip, signJwt } from "../signing.js";
@@ -44,6 +45,7 @@ export default function Shopper() {
   const [user, setUser] = useState(savedUser);
   const [key, setKey] = useState(undefined); // undefined: still loading
   const [orders, setOrders] = useState([]);
+  const [claims, setClaims] = useState([]);
 
   useEffect(() => {
     loadKey().then((k) => setKey(k || null));
@@ -58,7 +60,10 @@ export default function Shopper() {
   }, [user, key]);
 
   const refreshOrders = () => {
-    if (user) api(`/orders?user_id=${encodeURIComponent(user.id)}`).then(setOrders).catch(() => {});
+    if (!user) return;
+    const who = encodeURIComponent(user.id);
+    api(`/orders?user_id=${who}`).then(setOrders).catch(() => {});
+    api(`/claims?user_id=${who}`).then(setClaims).catch(() => {});
   };
   useEffect(refreshOrders, [user]);
 
@@ -75,7 +80,7 @@ export default function Shopper() {
         <p className="text-xs text-slate-400">Signing key on this device · PayPal sandbox account connected</p>
       </div>
       <AskAgent user={user} keyPair={key} onFinished={refreshOrders} />
-      <Orders orders={orders} userId={user.id} onChange={refreshOrders} />
+      <Orders orders={orders} claims={claims} userId={user.id} onChange={refreshOrders} />
     </div>
   );
 }
@@ -283,8 +288,9 @@ function useRevealed(steps) {
   return steps.slice(0, count);
 }
 
-function Orders({ orders, userId, onChange }) {
+function Orders({ orders, claims, userId, onChange }) {
   const [open, setOpen] = useState(null);
+  const claimFor = Object.fromEntries(claims.map((c) => [c.order_id, c]));
   if (!orders.length) return null;
   return (
     <Card>
@@ -296,11 +302,17 @@ function Orders({ orders, userId, onChange }) {
               <DecisionBadge decision={order.decision} />
               <span className="font-medium">{order.items.map((i) => i.title).join(", ") || "—"}</span>
               <span className="text-slate-500">{money(order.total, order.currency || "USD")}</span>
+              {claimFor[order.id] && <ClaimBadge status={claimFor[order.id].status} />}
               <span className="ml-auto text-xs text-slate-400">{new Date(order.created_at).toLocaleString()}</span>
             </button>
             {open === order.id && (
               <div className="mt-3">
-                <OrderCard order={order} userId={userId} onChange={onChange} />
+                <OrderCard
+                  order={order}
+                  userId={userId}
+                  onChange={onChange}
+                  footer={<ClaimBox order={order} claim={claimFor[order.id]} userId={userId} onChange={onChange} />}
+                />
               </div>
             )}
           </li>

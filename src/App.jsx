@@ -1,3 +1,4 @@
+import { Suspense, lazy } from "react";
 import { useRoute } from "./router.js";
 import { Card } from "./components/ui.jsx";
 import Home from "./pages/Home.jsx";
@@ -5,10 +6,15 @@ import Shopper from "./pages/Shopper.jsx";
 import Status from "./pages/Status.jsx";
 import Store from "./pages/Store.jsx";
 
+// AG Grid is big; only load it when someone opens the dashboard.
+const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
+const Admin = lazy(() => import("./pages/Admin.jsx"));
+
 const NAV = [
   ["shopper", "Shop with an agent"],
   ["store", "PayMart"],
   ["dashboard", "Dashboard"],
+  ["admin", "Admin"],
   ["status", "Status"],
 ];
 
@@ -19,7 +25,17 @@ export default function App() {
   if (page === "shopper") content = <Shopper />;
   else if (page === "store") content = <Store productId={arg} />;
   else if (page === "status") content = <Status />;
-  else if (page === "dashboard") content = <Card>The marketplace dashboard is coming next.</Card>;
+  else if (page === "admin")
+    content = (
+      <Suspense fallback={<Card>Loading the admin page…</Card>}>
+        <Admin />
+      </Suspense>
+    );
+  else if (page === "dashboard") content = (
+      <Suspense fallback={<Card>Loading the dashboard…</Card>}>
+        <Dashboard orderId={arg} />
+      </Suspense>
+    );
   else content = <Home />;
 
   return (
