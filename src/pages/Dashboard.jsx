@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
 import { api } from "../api.js";
-import { ClaimDetails } from "../components/Claim.jsx";
+import { ClaimDetails, STORE_CAN_DECIDE } from "../components/Claim.jsx";
 import OrderCard from "../components/OrderCard.jsx";
-import { Button, Card, DecisionBadge, money } from "../components/ui.jsx";
+import { AreaNav, Page } from "../components/Shell.jsx";
+import { Button, DecisionBadge, ErrorNote, Loading, PageHeader, Panel, StatBar, money } from "../components/ui.jsx";
 import { theme, usePolling } from "../grid.js";
 import { checkEvidence } from "../verify.js";
 
@@ -38,22 +39,34 @@ const REASONS = {
   SELLER_RISK: "Seller risk",
   CHECK_UNAVAILABLE: "Check unavailable",
 };
+const REASON_TONE = {
+  MANDATE_INVALID: "border-block/40 text-block",
+  LIMIT_EXCEEDED: "border-block/40 text-block",
+  AGENT_MANIPULATED: "border-block/40 text-block",
+  INJECTION_SUSPECTED: "border-hold/40 text-hold",
+  INTENT_MISMATCH: "border-hold/40 text-hold",
+  INTENT_UNCLEAR: "border-hold/40 text-hold",
+};
 const reasonText = (codes) => codes.map((c) => `${REASONS[c] || c} ${c}`).join(" ");
 
 const waiting = (o) => o.decision === "HOLD" && o.payment_status === "AUTHORIZED" && !o.resolution;
 const stopped = (o) => o.payment_status === "VOIDED" || (o.decision === "BLOCK" && o.payment_status === "NONE");
 const injected = (o) => o.reason_codes.some((c) => c === "AGENT_MANIPULATED" || c === "INJECTION_SUSPECTED");
 
-function DecisionCell({ value }) {
-  return <DecisionBadge decision={value} short />;
+function DecisionCell({ data }) {
+  return (
+    <span className="flex h-full items-center">
+      <DecisionBadge decision={data.decision} resolution={data.resolution} short />
+    </span>
+  );
 }
 
 function ReasonsCell({ value }) {
-  if (!value?.length) return <span className="text-slate-400">none</span>;
+  if (!value?.length) return <span className="text-ghost">none</span>;
   return (
     <span className="flex flex-wrap gap-1 py-2 leading-none">
       {value.map((code) => (
-        <span key={code} title={code} className="rounded bg-slate-100 px-1.5 py-1 text-xs text-slate-700">
+        <span key={code} title={code} className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${REASON_TONE[code] || "border-line2 text-dim"}`}>
           {REASONS[code] || code}
         </span>
       ))}
@@ -71,11 +84,18 @@ const COLUMNS = [
     filter: "agDateColumnFilter",
     filterValueGetter: (p) => new Date(p.data.created_at),
   },
-  { field: "decision", headerName: "Decision", width: 125, cellRenderer: DecisionCell },
+  {
+    colId: "decision",
+    headerName: "Decision",
+    width: 165,
+    // Includes the shopper's answer, so the cell redraws when a held order is approved or rejected
+    valueGetter: (p) => [p.data.decision, p.data.resolution].filter(Boolean).join(" · "),
+    cellRenderer: DecisionCell,
+  },
   {
     field: "reason_codes",
     headerName: "Why",
-    width: 230,
+    width: 330,
     cellRenderer: ReasonsCell,
     autoHeight: true,
     valueFormatter: (p) => p.value.join(" "),
@@ -105,66 +125,100 @@ const COLUMNS = [
   { field: "resolution", headerName: "Shopper's answer", width: 150,
     valueFormatter: (p) => ANSWERS[p.value] || (waiting(p.data) ? "Waiting" : "") },
   { field: "demo_agent", headerName: "Demo agent", width: 160, valueFormatter: (p) => AGENTS[p.value] || "Other" },
-  { field: "id", headerName: "Order", width: 150, cellClass: "font-mono text-[12px]" },
+  { field: "id", headerName: "Order", width: 150, cellClass: "font-mono text-[12px] text-dim" },
 ];
 
-export default function Dashboard({ orderId }) {
+// Claims PayMart has to act on: decide, take the item back, or retry the fund's payout.
+const needsAction = (c) =>
+  STORE_CAN_DECIDE.includes(c.status) ||
+  c.status === "APPROVED" ||
+  c.status === "STORE_RETURN" ||
+  (c.status === "REFUNDED" && c.payout_status !== "SUCCESS");
+
+// PayMart's side: every agent order MeantIt checked, the evidence, and claims to process.
+export default function Dashboard({ route }) {
   const [orders, error] = usePolling("/dashboard/orders"); // held orders change when the shopper answers
   const [claims, , reloadClaims] = usePolling("/claims");
+  let [tab, id] = route;
+  if (tab?.startsWith("ord_")) [tab, id] = ["orders", tab]; // old links: #/dashboard/{order}
+
+  let content;
+  if (error) content = <ErrorNote>Couldn't load orders: {error}</ErrorNote>;
+  else if (tab === "claims") content = <Claims claims={claims} reload={reloadClaims} />;
+  else if (tab === "orders" && id) content = <OrderPage orderId={id} orders={orders} claims={claims} reloadClaims={reloadClaims} />;
+  else content = <Orders orders={orders} />;
+
+  return (
+    <>
+      <AreaNav
+        name="Merchant console"
+        who="PayMart · signed in as the marketplace"
+        tone="info"
+        active={tab === "claims" ? "claims" : "orders"}
+        tabs={[
+          ["orders", "Agent orders", "#/dashboard"],
+          ["claims", "Claims", "#/dashboard/claims", (claims || []).filter(needsAction).length],
+        ]}
+      />
+      <Page>{content}</Page>
+    </>
+  );
+}
+
+function Orders({ orders }) {
   const [decision, setDecision] = useState("ALL");
   const [search, setSearch] = useState("");
   const grid = useRef(null);
-
   const rows = useMemo(
     () => (orders || []).filter((o) => decision === "ALL" || o.decision === decision),
     [orders, decision],
   );
-  const selected = orders?.find((o) => o.id === orderId);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">PayMart · agent orders</h1>
-        <p className="text-slate-500">
-          Every order an AI agent placed, what MeantIt decided, and why. Click a row for the evidence.
-        </p>
-      </div>
+    <div className="space-y-8">
+      <PageHeader eyebrow={<><span className="text-info">PayMart</span> / Agent orders</>} title="Every order an AI agent placed, and why MeantIt decided">
+        Approved orders were captured; blocked ones were voided before any charge. Click a row for the evidence.
+      </PageHeader>
+      {orders ? <Tiles orders={orders} /> : <Loading>Loading orders…</Loading>}
 
-      {error && <Card className="text-red-700">Couldn't load orders: {error}</Card>}
-      {orders && <Tiles orders={orders} />}
-
-      <Card className="space-y-3 !p-3 sm:!p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex rounded-lg ring-1 ring-slate-300" role="group" aria-label="Decision">
+      <Panel
+        bodyClassName="p-0"
+        title={
+          <div className="flex rounded-xl border border-line2" role="group" aria-label="Decision">
             {FILTERS.map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setDecision(key)}
-                className={`px-3 py-1.5 text-sm first:rounded-l-lg last:rounded-r-lg ${
-                  decision === key ? "bg-indigo-600 text-white" : "bg-white text-slate-700 hover:bg-slate-50"
+                className={`border-r border-line2 px-3 py-1.5 text-xs font-medium last:border-r-0 ${
+                  decision === key ? "bg-info/15 text-info" : "text-dim hover:text-ink"
                 }`}
               >
                 {label}
-                {orders && key !== "ALL" && ` ${orders.filter((o) => o.decision === key).length}`}
+                {orders && key !== "ALL" && <span className="ml-1.5 text-ghost">{orders.filter((o) => o.decision === key).length}</span>}
               </button>
             ))}
           </div>
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search words, products, reasons…"
-            className="min-w-0 flex-1 rounded-lg px-3 py-1.5 text-sm ring-1 ring-slate-300 focus:outline-none focus:ring-indigo-500"
-          />
-          <Button
-            variant="secondary"
-            className="!py-1.5"
-            onClick={() => grid.current?.api.exportDataAsCsv({ fileName: "paymart-agent-orders.csv" })}
-          >
-            Export CSV
-          </Button>
-        </div>
-        <div style={{ height: 480 }}>
+        }
+        right={
+          <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search words, products, reasons…"
+              className="field !w-auto min-w-0 flex-1 !py-1.5 sm:max-w-xs"
+            />
+            <Button
+              variant="secondary"
+              className="!py-2"
+              onClick={() => grid.current?.api.exportDataAsCsv({ fileName: "paymart-agent-orders.csv" })}
+            >
+              Export CSV
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ height: 560 }}>
           <AgGridReact
             ref={grid}
             theme={theme}
@@ -173,40 +227,17 @@ export default function Dashboard({ orderId }) {
             defaultColDef={{ filter: true, resizable: true, sortable: true }}
             getRowId={(p) => p.data.id}
             quickFilterText={search}
-            loading={!orders && !error}
-            overlayNoRowsTemplate="No agent orders yet. Place one from “Shop with an agent”."
-            rowClassRules={{ "!bg-indigo-50": (p) => p.data.id === orderId }}
-            onRowClicked={(e) => (window.location.hash = `#/dashboard/${e.data.id}`)}
+            loading={!orders}
+            overlayNoRowsTemplate="No agent orders yet. Place one from the Shopper tab."
+            rowStyle={{ cursor: "pointer" }}
+            onRowClicked={(e) => (window.location.hash = `#/dashboard/orders/${e.data.id}`)}
             pagination
             paginationPageSize={20}
             paginationPageSizeSelector={[20, 50, 100]}
             tooltipShowDelay={300}
           />
         </div>
-      </Card>
-
-      {orderId && !selected && orders && <Card>No order {orderId} in the last 200.</Card>}
-      {selected && <OrderDetail key={selected.id} order={selected} />}
-
-      {claims?.length > 0 && (
-        <Card className="space-y-3">
-          <div>
-            <h2 className="text-lg font-semibold">Claims</h2>
-            <p className="text-sm text-slate-500">
-              When an approved order was the agent's mistake: take the item back, refund the shopper, and the
-              MeantIt Protection Fund repays your costs.
-            </p>
-          </div>
-          {claims.map((claim) => (
-            <div key={claim.id} className="space-y-1">
-              <a href={`#/dashboard/${claim.order_id}`} className="text-sm text-indigo-700 hover:underline">
-                {claim.items.map((i) => i.title).join(", ")} · {money(claim.order_total)} · {claim.order_id}
-              </a>
-              <ClaimDetails claim={claim} audience="marketplace" onChange={reloadClaims} />
-            </div>
-          ))}
-        </Card>
-      )}
+      </Panel>
     </div>
   );
 }
@@ -215,32 +246,39 @@ function Tiles({ orders }) {
   const captured = orders.filter((o) => o.payment_status === "CAPTURED");
   const stoppedOrders = orders.filter(stopped);
   const sum = (list) => list.reduce((total, o) => total + (o.total || 0), 0);
-  const tiles = [
-    { label: "Agent orders checked", value: orders.length },
-    { label: "Captured", value: money(sum(captured)), note: `${captured.length} orders` },
-    { label: "Stopped before any charge", value: money(sum(stoppedOrders)), note: `${stoppedOrders.length} orders, no refunds or disputes` },
-    { label: "Waiting for the shopper", value: orders.filter(waiting).length, note: "money on hold" },
-    { label: "Hidden instructions caught", value: orders.filter(injected).length, note: "pages that talked to agents" },
-  ];
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-      {tiles.map((t) => (
-        <Card key={t.label} className="!p-4">
-          <p className="text-xs text-slate-500">{t.label}</p>
-          <p className="mt-1 text-2xl font-semibold tabular-nums">{t.value}</p>
-          {t.note && <p className="text-xs text-slate-400">{t.note}</p>}
-        </Card>
-      ))}
-    </div>
+    <StatBar
+      stats={[
+        { label: "Orders checked", value: orders.length, note: "by MeantIt at checkout" },
+        { label: "Captured", value: money(sum(captured)), note: `${captured.length} orders`, tone: "pass" },
+        { label: "Stopped, never charged", value: money(sum(stoppedOrders)), note: `${stoppedOrders.length} orders · no refunds or disputes`, tone: "block" },
+        { label: "Waiting for shopper", value: orders.filter(waiting).length, note: "money on hold", tone: "hold" },
+        { label: "Hidden instructions", value: orders.filter(injected).length, note: "pages that talked to agents", tone: "block" },
+      ]}
+    />
   );
 }
 
-function OrderDetail({ order }) {
-  const ref = useRef(null);
-  useEffect(() => ref.current?.scrollIntoView({ behavior: "smooth", block: "start" }), []);
+function OrderPage({ orderId, orders, claims, reloadClaims }) {
+  if (!orders) return <Loading>Loading the order…</Loading>;
+  const order = orders.find((o) => o.id === orderId);
+  const claim = claims?.find((c) => c.order_id === orderId);
   return (
-    <div ref={ref} className="scroll-mt-4">
-      <OrderCard order={order} audience="marketplace" footer={<Evidence orderId={order.id} />} />
+    <div className="space-y-6">
+      <a href="#/dashboard" className="text-xs font-medium text-dim hover:text-ink">
+        ← All agent orders
+      </a>
+      {!order ? (
+        <Panel>No order {orderId} in the last 200.</Panel>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
+          <OrderCard order={order} audience="marketplace" />
+          <div className="space-y-6 lg:sticky lg:top-24 lg:self-start">
+            <Evidence orderId={order.id} />
+            {claim && <ClaimDetails claim={claim} audience="marketplace" onChange={reloadClaims} />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -265,39 +303,69 @@ function Evidence({ orderId }) {
 
   const allOk = rows?.every((r) => r.ok);
   return (
-    <div className="rounded-lg p-4 ring-1 ring-slate-200">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="font-semibold">Evidence</h3>
-          <p className="text-sm text-slate-500">
-            Re-check every signature and hash here in your browser, using only the published public keys.
-          </p>
-        </div>
-        <Button variant="secondary" onClick={run} disabled={busy}>
+    <Panel title="Evidence" bodyClassName="">
+      <div className="space-y-4 p-5">
+        <p className="text-sm text-dim">
+          Re-check every signature and hash here in your browser, using only the published public keys. No need to trust
+          MeantIt's word.
+        </p>
+        <Button variant={rows ? "secondary" : "primary"} onClick={run} disabled={busy}>
           {busy ? "Checking…" : rows ? "Check again" : "Verify signatures"}
         </Button>
-      </div>
-      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
-      {rows && (
-        <>
-          <p className={`mt-3 text-sm font-medium ${allOk ? "text-emerald-700" : "text-red-700"}`}>
+        {error && <ErrorNote>{error}</ErrorNote>}
+        {rows && (
+          <p className={`font-mono text-xs font-semibold ${allOk ? "text-pass" : "text-block"}`}>
             {allOk
-              ? "✓ Everything checks out. Nobody changed the order or the decision after signing."
-              : "✗ Some checks failed. See which below."}
+              ? "✓ EVERYTHING CHECKS OUT. Nobody changed the order or the decision after signing."
+              : "✕ SOME CHECKS FAILED. See which below."}
           </p>
-          <ul className="mt-2 space-y-1 text-sm">
-            {rows.map((r) => (
-              <li key={r.label} className="flex gap-2">
-                <span className={`w-14 shrink-0 font-medium ${r.ok ? "text-emerald-700" : "text-red-700"}`}>
-                  {r.ok ? "✓ pass" : "✗ fail"}
-                </span>
-                <span>
-                  {r.label} <span className="text-slate-500">· {r.detail}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
+        )}
+      </div>
+      {rows && (
+        <ul className="border-t border-line font-mono text-[11px]">
+          {rows.map((r) => (
+            <li key={r.label} className="grid grid-cols-[48px_1fr] gap-2 border-b border-line px-5 py-2.5 last:border-b-0">
+              <span className={`font-semibold ${r.ok ? "text-pass" : "text-block"}`}>{r.ok ? "PASS" : "FAIL"}</span>
+              <span>
+                <span className="font-sans text-[13px] text-ink">{r.label}</span>
+                <span className="block break-all text-ghost">{r.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+function Claims({ claims, reload }) {
+  if (!claims) return <Loading>Loading claims…</Loading>;
+  const todo = claims.filter(needsAction);
+  const done = claims.filter((c) => !needsAction(c));
+  const show = (claim) => (
+    <div key={claim.id} className="space-y-2">
+      <a href={`#/dashboard/orders/${claim.order_id}`} className="flex flex-wrap items-center gap-x-3 text-sm text-dim hover:text-ink">
+        <span className="text-ink">{claim.items.map((i) => i.title).join(", ")}</span>
+        <span className="font-mono">{money(claim.order_total)}</span>
+        <span className="font-mono text-[11px] text-ghost">{claim.order_id} ›</span>
+      </a>
+      <ClaimDetails claim={claim} audience="marketplace" onChange={reload} />
+    </div>
+  );
+  return (
+    <div className="space-y-8">
+      <PageHeader eyebrow={<><span className="text-info">PayMart</span> / Claims</>} title="Problems shoppers reported to you">
+        Every report comes to you first. Take it back under your own policy, say no, or send it to the MeantIt
+        Protection Fund when the agent got it wrong on an order MeantIt approved. Then the fund repays your costs
+        through PayPal Payouts.
+      </PageHeader>
+      <Panel title={<span className={todo.length ? "text-hold" : ""}>Needs your action · {todo.length}</span>}>
+        {todo.length ? <div className="space-y-6">{todo.map(show)}</div> : <p className="text-sm text-dim">Nothing to do. New reports from shoppers show up here.</p>}
+      </Panel>
+      {done.length > 0 && (
+        <Panel title={`Other claims · ${done.length}`}>
+          <div className="space-y-6">{done.map(show)}</div>
+        </Panel>
       )}
     </div>
   );

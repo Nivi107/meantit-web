@@ -44,6 +44,16 @@ export async function createKey() {
   return pair;
 }
 
+// Start over as a new shopper: the old key is deleted and can never sign again.
+export async function forgetKey() {
+  memoryKey = null;
+  try {
+    await idb("readwrite", (store) => store.delete(KEY_ID));
+  } catch {
+    // nothing stored
+  }
+}
+
 export async function publicJwk(pair) {
   const { kty, crv, x, y } = await crypto.subtle.exportKey("jwk", pair.publicKey);
   return { kty, crv, x, y };
