@@ -44,14 +44,13 @@ export function Header({ page }) {
           <Logo />
           <span className="hidden min-[420px]:inline">MeantIt</span>
         </a>
-        <a
-          href="#/status"
+        <span
           title={text}
           className={`hidden items-center gap-2 rounded-full border border-line px-3 py-1 text-xs font-medium lg:flex ${color}`}
         >
           <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
           {text}
-        </a>
+        </span>
         <nav className="ml-auto flex items-center gap-1 rounded-full border border-line bg-panel/70 p-1">
           {NAV.map(([key, label]) => (
             <a
